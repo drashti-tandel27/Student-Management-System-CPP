@@ -1,0 +1,1967 @@
+#include <iostream>
+#include <string>
+#include <map>
+#include <fstream>
+#include <regex>
+#include <conio.h>
+#include <iomanip> 
+#include <sstream> 
+
+using namespace std;
+
+const string ADMIN_USER = "admin";
+const string ADMIN_PASS = "Admin@123";
+
+// In-memory user storage: role -> username/password 
+map<string, pair<string, string> > users; 
+const string FILE_NAME = "users.csv";
+
+
+const int consoleWidth = 100; // assumed console width (adjust as needed)
+// Function to save user into CSV file
+// Function to save user into CSV file
+void saveUser(string role, string username, string password) {
+    ofstream fout(FILE_NAME.c_str(), ios::app); // append mode
+    if (fout.is_open()) {
+        fout << role << "," << username << "," << password << "\n";
+        fout.close();
+        cout << "\n[" << role << "] Registered successfully!\n";
+    } else {
+        cout << "Error: Could not open file for writing!\n";
+    }
+}
+string getHiddenPassword(bool showAsterisk = false) {
+    string password;
+    char ch;
+
+    while (true) {
+        ch = _getch();   // read single char (not shown on screen)
+
+        if (ch == 13) {  // ENTER key pressed
+            cout << endl;
+            break;
+        } 
+        else if (ch == 8) {  // BACKSPACE
+            if (!password.empty()) {
+                password.pop_back();
+                if (showAsterisk) cout << "\b \b";
+            }
+        } 
+        else {
+            password.push_back(ch);
+            if (showAsterisk) cout << '*';  // show '*' if enabled
+        }
+    }
+    return password;
+}
+string generateId(const string &filename, const string &prefix) {
+    ifstream fin(filename);
+    string line, lastId = "";
+    
+    while (getline(fin, line)) {
+        stringstream ss(line);
+        string id;
+        getline(ss, id, ',');  // First column is ID
+        lastId = id;
+    }
+    fin.close();
+
+    int num = 0;
+    if (!lastId.empty()) {
+        // remove prefix T or S
+        num = stoi(lastId.substr(1));
+    }
+    num++; // next ID
+    stringstream ss;
+    ss << prefix << setw(3) << setfill('0') << num;
+    return ss.str();
+}
+
+// Function to validate password strength
+bool isValidPassword(const string &password) {
+    if (password.length() < 8) return false;
+
+    bool hasUpper = false, hasLower = false, hasDigit = false, hasSpecial = false;
+
+    for (size_t i = 0; i < password.length(); i++) {
+        char c = password[i];
+        if (isupper(c)) hasUpper = true;
+        else if (islower(c)) hasLower = true;
+        else if (isdigit(c)) hasDigit = true;
+        else hasSpecial = true;
+    }
+
+    return hasUpper && hasLower && hasDigit && hasSpecial;
+}
+bool isValidEmail(const string &email) {
+    int atPos = email.find('@');
+    int dotPos = email.find('.', atPos);
+
+    return (atPos != string::npos && dotPos != string::npos && atPos < dotPos);
+}
+bool isValidPhone(const string &phone) {
+    if (phone.length() != 10) return false;
+    for (int i = 0; i < phone.length(); i++) {
+        if (!isdigit(phone[i])) return false;
+    }
+    return true;
+}
+bool isValidDOB(const string &dob) {
+    if (dob.length() != 10) return false; // 10 chars: DD/MM/YYYY
+    if (dob[2] != '/' || dob[5] != '/') return false;
+
+    string dd = dob.substr(0,2);
+    string mm = dob.substr(3,2);
+    string yyyy = dob.substr(6,4);
+
+    int day = stoi(dd);
+    int month = stoi(mm);
+    int year = stoi(yyyy);
+
+    if (month < 1 || month > 12) return false;
+    if (day < 1 || day > 31) return false;
+    if (year < 1900 || year > 2025) return false;
+
+    return true;
+}
+bool isValidGender(const string &gender) {
+    return (gender == "Male" || gender == "Female" || gender == "Other");
+}
+
+// Helper to show departments and return vector of (deptId, deptName)
+vector<pair<string,string>> showDepartments() {
+    vector<pair<string,string>> deptList;
+    ifstream dfile("departments.csv");
+    string line;
+    cout << "\n+---------------------------------------------+\n";
+    cout << "| Department ID | Department Name              |\n";
+    cout << "+---------------------------------------------+\n";
+    while (getline(dfile, line)) {
+        stringstream ss(line);
+        string id, name, head;
+        getline(ss, id, ',');
+        getline(ss, name, ',');
+        getline(ss, head, ',');
+        deptList.push_back({id, name});
+        cout << "| " << setw(13) << left << id
+             << "| " << setw(27) << left << name << "|\n";
+    }
+    cout << "+---------------------------------------------+\n";
+    dfile.close();
+    return deptList;
+}
+
+bool isValidDeptId(const string &deptId, const vector<pair<string,string>> &deptList) {
+    for (auto &d : deptList) {
+        if (d.first == deptId) return true;
+    }
+    return false;
+}
+bool existsInFile(const string &filename, const string &id) {
+    ifstream fin(filename);
+    string line;
+    while (getline(fin, line)) {
+        stringstream ss(line);
+        string fileId;
+        getline(ss, fileId, ',');
+        if (fileId == id) return true;
+    }
+    return false;
+}
+// ----------------- Helper -----------------
+bool isNumber(const string &s) {
+    return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
+}
+
+string generateFeeId() {
+    static int counter = 1001;
+    return "F" + to_string(counter++);
+}
+
+struct Student {
+    string user, email, phone, dob, gender, address, pass;
+};
+struct Course {
+    string id;
+    string name;
+    string deptId;
+};
+
+// Load departments
+vector<pair<string,string>> loadDepartments() {
+    vector<pair<string,string>> list;
+    ifstream fin("departments.csv");
+    string line;
+    while (getline(fin, line)) {
+        if (line.empty()) continue;
+        stringstream ss(line);
+        string id, name, head;
+        getline(ss, id, ',');
+        getline(ss, name, ',');
+        getline(ss, head, '\n');
+        if (!id.empty()) list.emplace_back(id, name);
+    }
+    fin.close();
+    return list;
+}
+
+// Load all courses
+vector<Course> loadCourses() {
+    vector<Course> list;
+    ifstream fin("courses.csv");
+    string line;
+    while (getline(fin, line)) {
+        if (line.empty()) continue;
+        stringstream ss(line);
+        Course c;
+        getline(ss, c.id, ',');
+        getline(ss, c.name, ',');
+        getline(ss, c.deptId, '\n');
+        if (!c.id.empty()) list.push_back(c);
+    }
+    fin.close();
+    return list;
+}
+string trim(const string &s) {
+    size_t start = s.find_first_not_of(" \t\r\n");
+    size_t end = s.find_last_not_of(" \t\r\n");
+    return (start == string::npos) ? "" : s.substr(start, end - start + 1);
+}
+
+
+vector<pair<string,string>> loadCoursesForDept(const string& deptId) {
+    vector<pair<string,string>> courseList;
+    ifstream fin("courses.csv");
+    string line;
+    while (getline(fin, line)) {
+        stringstream ss(line);
+        string courseId, courseName, courseDept;
+        getline(ss, courseId, ',');
+        getline(ss, courseName, ',');
+        getline(ss, courseDept, ',');
+
+        courseDept = trim(courseDept);  // <--- trim spaces
+
+        if(courseDept == deptId) {
+            courseList.push_back({trim(courseId), trim(courseName)});
+        }
+    }
+    fin.close();
+    return courseList;
+}
+
+// Show courses (department-filtered)
+void showCourses(const vector<pair<string,string>>& courseList) {
+    cout << "\nAvailable Courses:\n";
+    cout << "ID\tName\n";
+    cout << "------------------\n";
+    for (auto &c : courseList) {
+        cout << c.first << "\t" << c.second << "\n";
+    }
+}
+
+// Show departments
+void showDepartments(const vector<pair<string,string>>& deptList) {
+    for (auto &d : deptList) {
+        cout << "DeptID: " << d.first << " | " << d.second << "\n";
+    }
+}
+
+// Get department name by ID
+string getDepartmentName(const string &deptId) {
+    auto depts = loadDepartments();
+    for (auto &d : depts) if (d.first == deptId) return d.second;
+    return "N/A";
+}
+
+string selectCourseForDept(const string& deptId) {
+    vector<pair<string,string>> courses = loadCoursesForDept(deptId);
+    if (courses.empty()) {
+        cout << "[!] No courses available for this department.\n";
+        return "";
+    }
+
+    // Display courses
+    cout << "\nAvailable Courses:\n";
+    cout << "ID\tName\n";
+    for(auto &c : courses) {
+        cout << c.first << "\t" << c.second << "\n";
+    }
+
+    string choice;
+    bool valid = false;
+    do {
+        cout << "Enter Course ID: ";
+        cin >> choice;
+        for (auto &c : courses) {
+            if (c.first == choice) {
+                valid = true;
+                break;
+            }
+        }
+        if (!valid) cout << "[!] Invalid Course ID. Try again.\n";
+    } while (!valid);
+
+    return choice;
+}
+
+// ------------------- Helper Functions -------------------
+//int consoleWidth = 100; // Adjust according to your console
+
+void printBanner(const std::string &title) {
+    int width = 60;
+    int leftMargin = (consoleWidth - width) / 2;
+    std::string margin(leftMargin, ' ');
+
+    std::cout << margin << std::string(width, '*') << "\n";
+    std::cout << margin << "*" << std::string(width - 2, ' ') << "*\n";
+
+    int innerMargin = 2;
+    int padding = (width - 2 - title.size() - innerMargin * 2) / 2;
+    std::cout << margin << "*"
+              << std::string(padding, ' ') << std::string(innerMargin, ' ')
+              << title
+              << std::string(innerMargin, ' ')
+              << std::string(width - 2 - title.size() - innerMargin * 2 - padding, ' ')
+              << "*\n";
+
+    std::cout << margin << "*" << std::string(width - 2, ' ') << "*\n";
+    std::cout << margin << std::string(width, '*') << "\n\n";
+}
+
+
+// ------------------- subMenus -------------------
+
+void manageTeachers() {
+    int choice;
+
+    do {
+        cout << "\n=========== MANAGE TEACHERS ===========\n";
+        cout << "1. View Teachers\n";
+        cout << "2. Add Teacher\n";
+        cout << "3. Update Teacher\n";
+        cout << "4. Delete Teacher\n";
+        cout << "5. Back\n";
+        cout << "=======================================\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+
+        if (choice == 1) {
+            // ----- VIEW TEACHERS -----
+            ifstream fin("teachers.csv");
+            ifstream fdept("departments.csv");
+            ifstream fcourse("courses.csv");
+
+            map<string, string> deptMap, courseMap;
+
+            string dline;
+            while (getline(fdept, dline)) {
+                stringstream ss(dline);
+                string id, name;
+                getline(ss, id, ',');
+                getline(ss, name, ',');
+                deptMap[id] = name;
+            }
+            fdept.close();
+
+            string cline;
+            while (getline(fcourse, cline)) {
+                stringstream ss(cline);
+                string id, name, dept;
+                getline(ss, id, ',');
+                getline(ss, name, ',');
+                getline(ss, dept, ',');
+                courseMap[id] = name;
+            }
+            fcourse.close();
+
+                    cout << "==================================================================================================================================\n";
+            cout << left << setw(10) << "TID"
+                << setw(15) << "Username"
+                 << setw(20) << "Email"
+                 << setw(12) << "Phone"
+                 << setw(14) << "DOB"
+                 << setw(12) << "Gender"
+                 << setw(25) << "Department"
+                 << setw(15) << "Course"
+                 << setw(10) << "Address" << "\n";
+                    cout << "==================================================================================================================================\n";
+
+            string line;
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string teacherId, user, email, phone, dob, gender, deptId, courseId, address, pass;
+                getline(ss, teacherId, ',');
+                getline(ss, user, ',');
+                getline(ss, email, ',');
+                getline(ss, phone, ',');
+                getline(ss, dob, ',');
+                getline(ss, gender, ',');
+                getline(ss, deptId, ',');
+                getline(ss, courseId, ',');
+                getline(ss, address, ',');
+                getline(ss, pass, '\n');
+
+                cout << left << setw(10) << teacherId
+                     << setw(15) << user
+                     << setw(20) << email
+                     << setw(12) << phone
+                     << setw(14) << dob
+                     << setw(12) << gender
+                     << setw(25) << deptMap[deptId]
+                     << setw(15) << courseMap[courseId]
+                     << setw(10) << address << "\n";
+            }
+            fin.close();
+            cout << "===============================================================================================================\n";
+        }
+
+        else if (choice == 2) {
+            // ----- ADD TEACHER -----
+            string teacherId = generateId("teachers.csv", "T");
+            string user, email, phone, dob, gender, address, pass, deptId, courseId;
+		
+            cout << "[Teacher] Auto-generated ID: " << teacherId << "\n";
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Enter username (First Last): ";
+            getline(cin, user);
+
+            do {
+                cout << "Enter Email: ";
+                cin >> email;
+                if (!isValidEmail(email)) cout << "[!] Invalid email format. Try again.\n";
+            } while (!isValidEmail(email));
+
+            do {
+                cout << "Enter Phone: ";
+                cin >> phone;
+                if (!isValidPhone(phone)) cout << "[!] Phone must be exactly 10 digits.\n";
+            } while (!isValidPhone(phone));
+
+            do {
+                cout << "Enter DOB (DD/MM/YYYY): ";
+                cin >> dob;
+                if (!isValidDOB(dob)) cout << "[!] Invalid DOB format. Try again.\n";
+            } while (!isValidDOB(dob));
+
+            do {
+                cout << "Enter Gender (Male/Female/Other): ";
+                cin >> gender;
+                if (!isValidGender(gender)) cout << "[!] Invalid gender. Try again.\n";
+            } while (!isValidGender(gender));
+  // declare once
+
+// Display departments
+vector<pair<string,string>> deptList = loadDepartments();
+showDepartments(deptList);
+
+do {
+    cout << "Enter Department ID: ";
+    cin >> deptId;  // reuse variable, don't redeclare
+    if (!existsInFile("departments.csv", deptId))
+        cout << "[!] Invalid Department ID. Try again.\n";
+} while (!existsInFile("departments.csv", deptId));
+
+
+
+// filtered course selection
+courseId = selectCourseForDept(deptId);
+            cin.ignore();
+            do {
+                cout << "Enter Address: ";
+                getline(cin, address);
+                if (address.empty()) cout << "[!] Address cannot be empty.\n";
+            } while (address.empty());
+
+            do {
+                cout << "Enter password: ";
+                pass = getHiddenPassword(true);
+                if (!isValidPassword(pass))
+                    cout << "\n[!] Weak password. Use at least 8 characters with uppercase, lowercase, digit, and special character.\n";
+            } while (!isValidPassword(pass));
+
+            ofstream fout("teachers.csv", ios::app);
+            fout << teacherId << "," << user << "," << email << "," << phone << "," << dob << ","
+                 << gender << "," << deptId << "," << courseId << "," << address << "," << pass << "\n";
+            fout.close();
+
+            cout << "[+] Teacher added successfully!\n";
+        }
+
+   else if (choice == 3) {
+    // ----- UPDATE TEACHER -----
+    string target;
+    cout << "Enter Teacher ID to update: ";
+    cin >> target;
+
+    ifstream fin("teachers.csv");
+    ofstream fout("temp.csv");
+    string line;
+    bool found = false;
+
+    while (getline(fin, line)) {
+        stringstream ss(line);
+        string teacherId, user, email, phone, dob, gender, deptId, courseId, address, pass;
+        getline(ss, teacherId, ',');
+        getline(ss, user, ',');
+        getline(ss, email, ',');
+        getline(ss, phone, ',');
+        getline(ss, dob, ',');
+        getline(ss, gender, ',');
+        getline(ss, deptId, ',');
+        getline(ss, courseId, ',');
+        getline(ss, address, ',');
+        getline(ss, pass, '\n');
+
+        if (teacherId == target) {
+            found = true;
+
+            cout << "\nCurrent Record:\n";
+              // Show current record in table format
+                    cout << "========================================================================================================================\n";
+
+            cout << left << setw(12) << "TeacherID"
+                 << setw(20) << "Username"
+                 << setw(20) << "Email"
+                 << setw(15) << "Phone"
+                 << setw(12) << "DOB"
+                 << setw(10) << "Gender"
+                 << setw(12) << "DeptID"
+                 << setw(12) << "CourseID"
+                 << setw(20) << "Address" << "\n";
+                    cout << "========================================================================================================================\n";
+     
+
+            cout << left << setw(12) << teacherId
+                 << setw(20) << user
+                 << setw(20) << email
+                 << setw(15) << phone
+                 << setw(12) << dob
+                 << setw(10) << gender
+                 << setw(12) << deptId
+                 << setw(12) << courseId
+                 << setw(20) << address << "\n";
+            cout << "===============================================================================================================\n";
+
+
+            int updateChoice;
+            do {
+                cout << "\nWhich attribute do you want to update?\n";
+                cout << "1. Username\n2. Email\n3. Phone\n4. DOB\n5. Gender\n";
+                cout << "6. Department & Course\n7. Address\n8. Password\n0. Done\n";
+                cout << "Enter choice: ";
+                cin >> updateChoice;
+
+                switch (updateChoice) {
+                    case 1:
+                        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                        cout << "Enter new Username: ";
+                        getline(cin, user);
+                        break;
+                    case 2:
+                        do {
+                            cout << "Enter new Email: ";
+                            cin >> email;
+                            if (!isValidEmail(email))
+                                cout << "[!] Invalid email format!\n";
+                        } while (!isValidEmail(email));
+                        break;
+                    case 3:
+                        do {
+                            cout << "Enter new Phone (10 digits): ";
+                            cin >> phone;
+                            if (!isValidPhone(phone))
+                                cout << "[!] Invalid phone number!\n";
+                        } while (!isValidPhone(phone));
+                        break;
+                    case 4:
+                        do {
+                            cout << "Enter new DOB (DD/MM/YYYY): ";
+                            cin >> dob;
+                            if (!isValidDOB(dob))
+                                cout << "[!] Invalid DOB format!\n";
+                        } while (!isValidDOB(dob));
+                        break;
+                    case 5:
+                        do {
+                            cout << "Enter new Gender (Male/Female/Other): ";
+                            cin >> gender;
+                            if (!isValidGender(gender))
+                                cout << "[!] Invalid gender!\n";
+                        } while (!isValidGender(gender));
+                        break;
+                    case 6: {
+                        cout << "\nUpdating Department & Course...\n";
+                        vector<pair<string,string>> deptList = loadDepartments();
+                        showDepartments(deptList);
+
+                        // Reuse existing deptId variable, don't redeclare
+                        do {
+                            cout << "Enter new Department ID: ";
+                            cin >> deptId;
+                            if (!existsInFile("departments.csv", deptId))
+                                cout << "[!] Invalid Department ID.\n";
+                        } while (!existsInFile("departments.csv", deptId));
+
+                        courseId = selectCourseForDept(deptId);
+                        break;
+                    }
+                    case 7:
+                        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                        cout << "Enter new Address: ";
+                        getline(cin, address);
+                        break;
+                    case 8:
+                        do {
+                            cout << "Enter new Password: ";
+                            pass = getHiddenPassword(true);
+                            if (!isValidPassword(pass))
+                                cout << "[!] Weak password.\n";
+                        } while (!isValidPassword(pass));
+                        break;
+                }
+            } while (updateChoice != 0);
+        }
+
+        fout << teacherId << "," << user << "," << email << "," << phone << ","
+             << dob << "," << gender << "," << deptId << "," << courseId << ","
+             << address << "," << pass << "\n";
+    }
+
+    fin.close();
+    fout.close();
+    remove("teachers.csv");
+    rename("temp.csv", "teachers.csv");
+
+    if (found) cout << "[+] Teacher updated successfully!\n";
+    else cout << "[!] Teacher not found!\n";
+}
+
+
+        else if (choice == 4) {
+            // ----- DELETE TEACHER -----
+            string target;
+            cout << "Enter Teacher ID to delete: ";
+            cin >> target;
+
+            ifstream fin("teachers.csv");
+            ofstream fout("temp.csv");
+            string line;
+            bool found = false;
+
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string teacherId;
+                getline(ss, teacherId, ',');
+                if (teacherId == target) {
+                    found = true;
+                    continue;
+                }
+                fout << line << "\n";
+            }
+            fin.close();
+            fout.close();
+            remove("teachers.csv");
+            rename("temp.csv", "teachers.csv");
+
+            if (found) cout << "[+] Teacher deleted successfully!\n";
+            else cout << "[!] Teacher not found!\n";
+        }
+
+    } while (choice != 5);
+}
+
+// ------------------- Manage Students -------------------
+void manageStudents() {
+    int choice;
+    do {
+        std::cout << "\n=========== MANAGE STUDENTS ===========\n";
+        std::cout << "1. Add Student\n";
+        std::cout << "2. Update Student\n";
+        std::cout << "3. Delete Student\n";
+        std::cout << "4. View Students (Department-wise / Course-wise)\n";
+        std::cout << "5. Back\n";
+        std::cout << "=======================================\n";
+        std::cout << "Enter your choice: ";
+        std::cin >> choice;
+
+        // ----------------- ADD STUDENT -----------------
+        if (choice == 1) {
+            std::string enrollNo = generateId("students.csv", "E"); // Auto Enrollment No
+            std::string rollNo, user, email, phone, dob, gender, address, pass, deptId, courseId;
+
+            std::cout << "[Student] Auto-generated Enrollment No: " << enrollNo << "\n";
+            std::cout << "Enter Roll No: ";
+            std::cin >> rollNo;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+            std::cout << "Enter username (First Last): ";
+            getline(std::cin, user);
+
+            // Email
+            do {
+                std::cout << "Enter Email: ";
+                std::cin >> email;
+                if (!isValidEmail(email)) std::cout << "[!] Invalid email format.\n";
+            } while (!isValidEmail(email));
+
+            // Phone
+            do {
+                std::cout << "Enter Phone: ";
+                std::cin >> phone;
+                if (!isValidPhone(phone)) std::cout << "[!] Invalid phone number.\n";
+            } while (!isValidPhone(phone));
+
+            // DOB
+            do {
+                std::cout << "Enter DOB (DD/MM/YYYY): ";
+                std::cin >> dob;
+                if (!isValidDOB(dob)) std::cout << "[!] Invalid DOB format.\n";
+            } while (!isValidDOB(dob));
+
+            // Gender
+            do {
+                std::cout << "Enter Gender (M/F/O): ";
+                std::cin >> gender;
+                if (!isValidGender(gender)) std::cout << "[!] Invalid gender.\n";
+            } while (!isValidGender(gender));
+
+            std::cin.ignore();
+            std::cout << "Enter Address: ";
+            getline(std::cin, address);
+
+            // Department selection
+            auto deptList = loadDepartments();
+            showDepartments(deptList);
+
+            do {
+                std::cout << "Enter Department ID: ";
+                std::cin >> deptId;
+                if (!existsInFile("departments.csv", deptId))
+                    std::cout << "[!] Invalid Department ID.\n";
+            } while (!existsInFile("departments.csv", deptId));
+
+            // Course selection
+            courseId = selectCourseForDept(deptId);
+
+            // Password
+            do {
+                std::cout << "Enter Password: ";
+                pass = getHiddenPassword(true);
+                if (!isValidPassword(pass)) std::cout << "[!] Weak password.\n";
+            } while (!isValidPassword(pass));
+
+            std::ofstream fout("students.csv", std::ios::app);
+            fout << enrollNo << "," << rollNo << "," << user << "," << email << "," << phone << ","
+                 << dob << "," << gender << "," << deptId << "," << courseId << "," << address
+                 << "," << pass << "\n";
+            fout.close();
+            std::cout << "[+] Student added successfully!\n";
+        }
+
+        // ----------------- UPDATE STUDENT -----------------
+else if (choice == 2) {
+    std::string target;
+    std::cout << "Enter Enrollment No to update: ";
+    std::cin >> target;
+
+    std::ifstream fin("students.csv");
+    std::ofstream fout("temp.csv");
+    std::string line;
+    bool found = false;
+
+    while (getline(fin, line)) {
+        std::stringstream ss(line);
+        std::string enrollNo, rollNo, user, email, phone, dob, gender, deptId, courseId, address, pass;
+        getline(ss, enrollNo, ','); getline(ss, rollNo, ','); getline(ss, user, ',');
+        getline(ss, email, ','); getline(ss, phone, ','); getline(ss, dob, ',');
+        getline(ss, gender, ','); getline(ss, deptId, ','); getline(ss, courseId, ',');
+        getline(ss, address, ','); getline(ss, pass, '\n');
+
+        if (enrollNo == target) {
+            found = true;
+
+            int updateChoice;
+            auto deptList = loadDepartments();
+            do {
+                std::cout << "\nWhich attribute do you want to update?\n";
+                std::cout << "1. Username\n2. Email\n3. Phone\n4. DOB\n5. Gender\n";
+                std::cout << "6. Department & Course\n7. Address\n8. Password\n0. Done\n";
+                std::cout << "Enter choice: ";
+                std::cin >> updateChoice;
+
+                switch (updateChoice) {
+                    case 1:
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        std::cout << "Enter new Username: ";
+                        getline(std::cin, user);
+                        break;
+                    case 2:
+                        do {
+                            std::cout << "Enter new Email: ";
+                            std::cin >> email;
+                            if (!isValidEmail(email)) std::cout << "[!] Invalid email format.\n";
+                        } while (!isValidEmail(email));
+                        break;
+                    case 3:
+                        do {
+                            std::cout << "Enter new Phone: ";
+                            std::cin >> phone;
+                            if (!isValidPhone(phone)) std::cout << "[!] Invalid phone number.\n";
+                        } while (!isValidPhone(phone));
+                        break;
+                    case 4:
+                        do {
+                            std::cout << "Enter new DOB: ";
+                            std::cin >> dob;
+                            if (!isValidDOB(dob)) std::cout << "[!] Invalid DOB format.\n";
+                        } while (!isValidDOB(dob));
+                        break;
+                    case 5:
+                        do {
+                            std::cout << "Enter new Gender: ";
+                            std::cin >> gender;
+                            if (!isValidGender(gender)) std::cout << "[!] Invalid gender.\n";
+                        } while (!isValidGender(gender));
+                        break;
+                    case 6:
+                        showDepartments(deptList);
+                        do {
+                            std::cout << "Enter new Department ID: ";
+                            std::cin >> deptId;
+                            if (!existsInFile("departments.csv", deptId))
+                                std::cout << "[!] Invalid Department ID.\n";
+                        } while (!existsInFile("departments.csv", deptId));
+                        courseId = selectCourseForDept(deptId);
+                        break;
+                    case 7:
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        std::cout << "Enter new Address: ";
+                        getline(std::cin, address);
+                        break;
+                    case 8:
+                        do {
+                            std::cout << "Enter new Password: ";
+                            pass = getHiddenPassword(true);
+                            if (!isValidPassword(pass)) std::cout << "[!] Weak password.\n";
+                        } while (!isValidPassword(pass));
+                        break;
+                }
+            } while (updateChoice != 0);
+        }
+
+        fout << enrollNo << "," << rollNo << "," << user << "," << email << "," << phone << "," 
+             << dob << "," << gender << "," << deptId << "," << courseId << "," << address << "," << pass << "\n";
+    }
+
+    fin.close();
+    fout.close();
+    remove("students.csv");
+    rename("temp.csv", "students.csv");
+
+    if (found) std::cout << "[+] Student updated successfully!\n";
+    else std::cout << "[!] Enrollment No not found!\n";
+}
+
+// ----------------- DELETE STUDENT -----------------
+else if (choice == 3) {
+    std::string target;
+    std::cout << "Enter Enrollment No to delete: ";
+    std::cin >> target;
+
+    std::ifstream fin("students.csv");
+    std::ofstream fout("temp.csv");
+    std::string line;
+    bool found = false;
+
+    while (getline(fin, line)) {
+        std::stringstream ss(line);
+        std::string enrollNo;
+        getline(ss, enrollNo, ',');
+        if (enrollNo == target) {
+            found = true;
+            continue; // skip writing this student
+        }
+        fout << line << "\n";
+    }
+
+    fin.close();
+    fout.close();
+    remove("students.csv");
+    rename("temp.csv", "students.csv");
+
+    if (found) std::cout << "[+] Student deleted successfully!\n";
+    else std::cout << "[!] Enrollment No not found!\n";
+}
+
+        // ----------------- VIEW STUDENTS -----------------
+        else if (choice == 4) {
+            auto deptList = loadDepartments();
+            showDepartments(deptList);
+
+            std::string deptId;
+            std::cout << "Enter Department ID to view students: ";
+            std::cin >> deptId;
+
+            std::vector<std::pair<std::string,std::string>> courseList = loadCoursesForDept(deptId);
+            showCourses(courseList);
+
+            std::string courseId;
+            std::cout << "Enter Course ID to filter students (or ALL for all courses): ";
+            std::cin >> courseId;
+
+            std::ifstream fin("students.csv");
+            std::string line;
+            std::cout << "\nEnrollNo  RollNo  Username          Email               Phone       DOB        Gender  Course       Address\n";
+            std::cout << "==============================================================================================================\n";
+
+            while (getline(fin, line)) {
+                std::stringstream ss(line);
+                std::string enrollNo, rollNo, user, email, phone, dob, gender, dept, course, address, pass;
+                getline(ss, enrollNo, ','); getline(ss, rollNo, ','); getline(ss, user, ',');
+                getline(ss, email, ','); getline(ss, phone, ','); getline(ss, dob, ',');
+                getline(ss, gender, ','); getline(ss, dept, ','); getline(ss, course, ',');
+                getline(ss, address, ','); getline(ss, pass, '\n');
+
+                if (dept == deptId && (course == courseId || courseId == "ALL")) {
+                    std::cout << std::left << std::setw(10) << enrollNo
+                              << std::setw(8) << rollNo
+                              << std::setw(18) << user
+                              << std::setw(20) << email
+                              << std::setw(12) << phone
+                              << std::setw(12) << dob
+                              << std::setw(8) << gender
+                              << std::setw(12) << course
+                              << std::setw(15) << address << "\n";
+                }
+            }
+            fin.close();
+            std::cout << "==============================================================================================================\n";
+        }
+
+    } while (choice != 5); // end of do-while
+} // end of manageStudents
+
+// ----------------- Admin View Fees -----------------
+void adminViewFees07() {
+    string line;
+
+    // Load students
+    ifstream fstu("students.csv");
+    map<string, tuple<string,string,string,string>> studentMap; // enrollNo -> (name, rollNo, deptId, courseId)
+    while (getline(fstu, line)) {
+        stringstream ss(line);
+        string enrollNo, rollNo, name, email, phone, dob, gender, deptId, courseId, address, pass;
+        getline(ss, enrollNo, ','); getline(ss, rollNo, ','); getline(ss, name, ',');
+        getline(ss, email, ','); getline(ss, phone, ','); getline(ss, dob, ','); getline(ss, gender, ',');
+        getline(ss, deptId, ','); getline(ss, courseId, ','); getline(ss, address, ','); getline(ss, pass, '\n');
+        studentMap[enrollNo] = make_tuple(name, rollNo, deptId, courseId);
+    }
+    fstu.close();
+
+    // Load departments
+    ifstream fdept("departments.csv");
+    map<string, string> deptMap;
+    while (getline(fdept, line)) {
+        stringstream ss(line);
+        string id, name, head;
+        getline(ss, id, ','); getline(ss, name, ','); getline(ss, head, '\n');
+        deptMap[id] = name;
+    }
+    fdept.close();
+
+    // Load courses
+    ifstream fcourse("courses.csv");
+    map<string, tuple<string,string,string>> courseMap; // courseId -> (name, deptId, fee)
+    while (getline(fcourse, line)) {
+        stringstream ss(line);
+        string id, cname, deptId, fee;
+        getline(ss, id, ','); getline(ss, cname, ','); getline(ss, deptId, ','); getline(ss, fee, '\n');
+        courseMap[id] = make_tuple(cname, deptId, fee);
+    }
+    fcourse.close();
+
+    // ----------------- Select Department -----------------
+    cout << "\nAvailable Departments:\n";
+    for (auto &d : deptMap) {
+        cout << d.first << " | " << d.second << "\n";
+    }
+
+    string deptChoice;
+    cout << "Enter Department ID to filter (or ALL for all departments): ";
+    cin >> deptChoice;
+
+    // ----------------- Select Course -----------------
+    vector<pair<string,string>> courseList;
+    if (deptChoice != "ALL") {
+        for (auto &c : courseMap) {
+            if (get<1>(c.second) == deptChoice)
+                courseList.push_back({c.first, get<0>(c.second)});
+        }
+
+        cout << "\nAvailable Courses in " << deptMap[deptChoice] << ":\n";
+        for (auto &c : courseList)
+            cout << c.first << " | " << c.second << "\n";
+    }
+
+    string courseChoice;
+    cout << "Enter Course ID to filter (or ALL for all courses): ";
+    cin >> courseChoice;
+
+    // ----------------- Display Fee Records -----------------
+    ifstream fin("fees.csv");
+    cout << "\n" << left << setw(8) << "FeeID" 
+         << setw(12) << "EnrollNo" 
+         << setw(20) << "Name" 
+         << setw(20) << "Department"
+         << setw(25) << "Course"
+         << setw(10) << "Total"
+         << setw(10) << "Paid"
+         << setw(15) << "Date"
+         << setw(10) << "Status" << "\n";
+    cout << string(130, '-') << "\n";
+
+    while (getline(fin, line)) {
+        string feeId, stuId, courseId, total, paid, date, status;
+        stringstream ss(line);
+        getline(ss, feeId, ','); getline(ss, stuId, ','); getline(ss, courseId, ',');
+        getline(ss, total, ','); getline(ss, paid, ','); getline(ss, date, ','); getline(ss, status, '\n');
+
+        if (studentMap.count(stuId) == 0) continue;
+
+        string name = get<0>(studentMap[stuId]);
+        string deptId = get<2>(studentMap[stuId]);
+        string deptName = deptMap.count(deptId) ? deptMap[deptId] : "N/A";
+        string courseName = courseMap.count(courseId) ? get<0>(courseMap[courseId]) : "N/A";
+
+        // Filter by department
+        if (deptChoice != "ALL" && deptId != deptChoice) continue;
+        // Filter by course
+        if (courseChoice != "ALL" && courseId != courseChoice) continue;
+
+        cout << left << setw(8) << feeId 
+             << setw(12) << stuId 
+             << setw(20) << name 
+             << setw(20) << deptName
+             << setw(25) << courseName 
+             << setw(10) << total 
+             << setw(10) << paid 
+             << setw(15) << date 
+             << setw(10) << status << "\n";
+    }
+    fin.close();
+    cout << string(130, '-') << "\n";
+}
+
+
+void manageCourses() {
+    int choice;
+    do {
+        cout << "\n=========== MANAGE COURSES ===========\n";
+        cout << "1. View Courses\n";
+        cout << "2. Add Course\n";
+        cout << "3. Update Course\n";
+        cout << "4. Delete Course\n";
+        cout << "5. Back\n";
+        cout << "======================================\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+
+        if (choice == 1) {
+            // ----- VIEW COURSES -----
+            ifstream fin("courses.csv");
+            vector<pair<string,string>> deptList = showDepartments();
+            string line;
+
+            cout << "\n+----------------------------------------------------------------------------+\n";
+            cout << "| Course ID | Course Name           | Department Name         | Course Fee   |\n";
+            cout << "+----------------------------------------------------------------------------+\n";
+
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string id, name, deptId, fee;
+                getline(ss, id, ',');
+                getline(ss, name, ',');
+                getline(ss, deptId, ',');
+                getline(ss, fee, '\n');
+
+                string deptName = "N/A";
+                for (auto &d : deptList) {
+                    if (d.first == deptId) deptName = d.second;
+                }
+
+                cout << "| " << setw(9) << left << id
+                     << "| " << setw(22) << left << name
+                     << "| " << setw(24) << left << deptName
+                     << "| " << setw(11) << left << fee << "|\n";
+            }
+            cout << "+----------------------------------------------------------------------------+\n";
+            fin.close();
+
+        } else if (choice == 2) {
+            // ----- ADD COURSE -----
+            string id, name, deptId, fee;
+
+            // Auto-generate Course ID
+            int maxId = 0;
+            ifstream fin("courses.csv");
+            string line;
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string cid;
+                getline(ss, cid, ',');
+                if (cid.size() >= 2) {
+                    int num = stoi(cid.substr(1));
+                    if (num > maxId) maxId = num;
+                }
+            }
+            fin.close();
+            id = "C" + string(3 - to_string(maxId + 1).length(), '0') + to_string(maxId + 1);
+
+            cout << "[Auto] Generated Course ID: " << id << "\n";
+
+            cout << "Enter Course Name: ";
+            cin.ignore();
+            getline(cin, name);
+
+            // Show and validate department
+            vector<pair<string,string>> deptList = showDepartments();
+            do {
+                cout << "Select Department ID for this course: ";
+                cin >> deptId;
+                if (!isValidDeptId(deptId, deptList)) {
+                    cout << "[!] Invalid Department ID. Try again!\n";
+                }
+            } while (!isValidDeptId(deptId, deptList));
+
+            // Enter course fee
+            do {
+                cout << "Enter Course Fee: ";
+                cin >> fee;
+                if (!isNumber(fee)) cout << "[!] Enter a valid numeric fee!\n";
+            } while (!isNumber(fee));
+
+            ofstream fout("courses.csv", ios::app);
+            fout << id << "," << name << "," << deptId << "," << fee << "\n";
+            fout.close();
+            cout << "[+] Course added successfully!\n";
+
+        } else if (choice == 3) {
+            // ----- UPDATE COURSE -----
+            string target;
+            cout << "Enter Course ID to update: ";
+            cin >> target;
+
+            ifstream fin("courses.csv");
+            ofstream fout("temp.csv");
+            string line;
+            bool found = false;
+
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string id, name, deptId, fee;
+                getline(ss, id, ',');
+                getline(ss, name, ',');
+                getline(ss, deptId, ',');
+                getline(ss, fee, '\n');
+
+                if (id == target) {
+                    found = true;
+                    cout << "Enter New Course Name: ";
+                    cin.ignore();
+                    getline(cin, name);
+
+                    // Show and validate department
+                    vector<pair<string,string>> deptList = showDepartments();
+                    do {
+                        cout << "Enter New Department ID: ";
+                        cin >> deptId;
+                        if (!isValidDeptId(deptId, deptList)) {
+                            cout << "[!] Invalid Department ID. Try again!\n";
+                        }
+                    } while (!isValidDeptId(deptId, deptList));
+
+                    // Update course fee
+                    do {
+                        cout << "Enter New Course Fee: ";
+                        cin >> fee;
+                        if (!isNumber(fee)) cout << "[!] Enter a valid numeric fee!\n";
+                    } while (!isNumber(fee));
+
+                    fout << id << "," << name << "," << deptId << "," << fee << "\n";
+                } else {
+                    fout << line << "\n";
+                }
+            }
+            fin.close();
+            fout.close();
+            remove("courses.csv");
+            rename("temp.csv", "courses.csv");
+
+            if (found) cout << "[+] Course updated successfully!\n";
+            else cout << "[!] Course not found!\n";
+
+        } else if (choice == 4) {
+            // ----- DELETE COURSE -----
+            string target;
+            cout << "Enter Course ID to delete: ";
+            cin >> target;
+
+            ifstream fin("courses.csv");
+            ofstream fout("temp.csv");
+            string line;
+            bool found = false;
+
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string id;
+                getline(ss, id, ',');
+                if (id == target) {
+                    found = true;
+                    continue; // skip this course
+                }
+                fout << line << "\n";
+            }
+            fin.close();
+            fout.close();
+            remove("courses.csv");
+            rename("temp.csv", "courses.csv");
+
+            if (found) cout << "[+] Course deleted successfully!\n";
+            else cout << "[!] Course not found!\n";
+        }
+
+    } while (choice != 5);
+}
+
+
+void manageDepartments() {
+    int choice;
+    do {
+        cout << "\n=========== MANAGE DEPARTMENTS ===========\n";
+        cout << "1. View Departments\n";
+        cout << "2. Add Department\n";
+        cout << "3. Update Department\n";
+        cout << "4. Delete Department\n";
+        cout << "5. Back\n";
+        cout << "==========================================\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+
+        if (choice == 1) {
+            // ----- VIEW DEPARTMENTS -----
+            ifstream fin("departments.csv");
+            string line;
+
+            cout << "\n+---------------------------------------------------------+\n";
+            cout << "| Dept ID    | Department Name         | Head of Dept     |\n";
+            cout << "+---------------------------------------------------------+\n";
+
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string deptId, deptName, hod;
+                getline(ss, deptId, ',');
+                getline(ss, deptName, ',');
+                getline(ss, hod, '\n');
+
+                cout << "| " << setw(10) << left << deptId
+                     << " | " << setw(23) << left << deptName
+                     << " | " << setw(15) << left << hod << " |\n";
+            }
+            cout << "+---------------------------------------------------------+\n";
+            fin.close();
+
+        } else if (choice == 2) {
+    // ----- ADD DEPARTMENT -----
+    string deptId, deptName, hod;
+
+    // Auto-generate Dept ID
+    int maxId = 0;
+    ifstream fin("departments.csv");
+    string line;
+    while (getline(fin, line)) {
+        stringstream ss(line);
+        string did;
+        getline(ss, did, ',');
+        if (did.size() >= 2) {
+            int num = stoi(did.substr(1)); // remove 'D' and convert to int
+            if (num > maxId) maxId = num;
+        }
+    }
+    fin.close();
+    deptId = "D" + string(3 - to_string(maxId + 1).length(), '0') + to_string(maxId + 1);
+
+    cout << "[Auto] Generated Department ID: " << deptId << "\n";
+
+    cout << "Enter Department Name: ";
+    cin.ignore();
+    getline(cin, deptName);
+    cout << "Enter Head of Department: ";
+    getline(cin, hod);
+
+    ofstream fout("departments.csv", ios::app);
+    fout << deptId << "," << deptName << "," << hod << "\n";
+    fout.close();
+
+    cout << "[+] Department added successfully!\n";
+}
+else if (choice == 3) {
+            // ----- UPDATE DEPARTMENT -----
+            string targetId;
+            cout << "Enter Department ID to update: ";
+            cin >> targetId;
+
+            ifstream fin("departments.csv");
+            ofstream fout("temp.csv");
+            string line;
+            bool found = false;
+
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string deptId, deptName, hod;
+                getline(ss, deptId, ',');
+                getline(ss, deptName, ',');
+                getline(ss, hod, '\n');
+
+                if (deptId == targetId) {
+                    found = true;
+                    cout << "Enter new Department Name: ";
+                    cin.ignore();
+                    getline(cin, deptName);
+                    cout << "Enter new Head of Department: ";
+                    getline(cin, hod);
+                }
+
+                fout << deptId << "," << deptName << "," << hod << "\n";
+            }
+
+            fin.close();
+            fout.close();
+            remove("departments.csv");
+            rename("temp.csv", "departments.csv");
+
+            if (found) cout << "[+] Department updated successfully!\n";
+            else cout << "[!] Department ID not found!\n";
+
+        } else if (choice == 4) {
+            // ----- DELETE DEPARTMENT -----
+            string targetId;
+            cout << "Enter Department ID to delete: ";
+            cin >> targetId;
+
+            ifstream fin("departments.csv");
+            ofstream fout("temp.csv");
+            string line;
+            bool found = false;
+
+            while (getline(fin, line)) {
+                stringstream ss(line);
+                string deptId;
+                getline(ss, deptId, ',');
+
+                if (deptId == targetId) {
+                    found = true;
+                    continue; // skip this dept
+                }
+                fout << line << "\n";
+            }
+
+            fin.close();
+            fout.close();
+            remove("departments.csv");
+            rename("temp.csv", "departments.csv");
+
+            if (found) cout << "[+] Department deleted successfully!\n";
+            else cout << "[!] Department ID not found!\n";
+        }
+
+    } while (choice != 5);
+}
+
+
+
+void adminSetFee() {
+    string studentEnroll, courseId, totalAmount;
+    string line;
+
+    // 1?? Load students (name, rollNo, deptId, courseId)
+    ifstream fin("students.csv");
+    map<string, tuple<string,string,string,string>> studentMap;
+    while (getline(fin, line)) {
+        stringstream ss(line);
+        string enrollNo, rollNo, name, email, phone, dob, gender, deptId, courseId, address, pass;
+        getline(ss, enrollNo, ','); getline(ss, rollNo, ','); getline(ss, name, ',');
+        getline(ss, email, ','); getline(ss, phone, ','); getline(ss, dob, ','); getline(ss, gender, ',');
+        getline(ss, deptId, ','); getline(ss, courseId, ','); getline(ss, address, ','); getline(ss, pass, '\n');
+        studentMap[enrollNo] = make_tuple(name, rollNo, deptId, courseId);
+    }
+    fin.close();
+
+    // 2?? Load departments
+    ifstream fdept("departments.csv");
+    map<string, string> deptMap;
+    while (getline(fdept, line)) {
+        stringstream ss(line);
+        string id, name;
+        getline(ss, id, ','); getline(ss, name, ',');
+        deptMap[id] = name;
+    }
+    fdept.close();
+
+    // 3?? Load courses (courseName, deptId, fee)
+    ifstream fcourse("courses.csv");
+    map<string, tuple<string,string,string>> courseMap;
+    while (getline(fcourse, line)) {
+        stringstream ss(line);
+        string id, cname, deptId, fee;
+        getline(ss, id, ','); getline(ss, cname, ','); getline(ss, deptId, ','); getline(ss, fee, '\n');
+        courseMap[id] = make_tuple(cname, deptId, fee);
+    }
+    fcourse.close();
+
+    // 4?? Choose student
+    cout << "Existing Students:\n";
+    cout << left << setw(12) << "EnrollNo" << setw(20) << "Name" << setw(20) << "Department\n";
+    cout << "-----------------------------------------------------------\n";
+    for (auto &s : studentMap) {
+        cout << left << setw(12) << s.first 
+             << setw(20) << get<0>(s.second) 
+             << setw(20) << deptMap[get<2>(s.second)] << "\n";
+    }
+
+    do {
+        cout << "Enter Student Enrollment No: ";
+        cin >> studentEnroll;
+        if (studentMap.find(studentEnroll) == studentMap.end())
+            cout << "[!] Invalid Enrollment No!\n";
+    } while (studentMap.find(studentEnroll) == studentMap.end());
+
+    auto studentData = studentMap[studentEnroll];
+    string studentName = get<0>(studentData);
+    string rollNo = get<1>(studentData);
+    string deptId = get<2>(studentData);
+    string studentCourseId = get<3>(studentData);
+
+    // 5?? Display student details
+    cout << "\n========== STUDENT DETAILS ==========\n";
+    cout << "Enrollment No : " << studentEnroll << "\n";
+    cout << "Name          : " << studentName << "\n";
+    cout << "Roll No       : " << rollNo << "\n";
+    cout << "Department    : " << (deptMap.count(deptId) ? deptMap[deptId] : "N/A") << "\n";
+    cout << "Course        : " << (courseMap.count(studentCourseId) ? get<0>(courseMap[studentCourseId]) : "N/A") << "\n";
+    cout << "Course Fee    : " << (courseMap.count(studentCourseId) ? get<2>(courseMap[studentCourseId]) : "0") << "\n";
+    cout << "====================================\n";
+
+    if (studentCourseId.empty() || courseMap.find(studentCourseId) == courseMap.end()) {
+        cout << "[!] No course assigned for this student. Cannot set fee.\n";
+        return;
+    }
+
+    courseId = studentCourseId;
+    totalAmount = get<2>(courseMap[courseId]);
+
+    // 6?? Update or Create Fee Record
+    ifstream ffees("fees.csv");
+    ofstream temp("temp.csv");
+    bool found = false;
+    string feeId = generateFeeId();
+
+    while (getline(ffees, line)) {
+        stringstream ss(line);
+        string fId, sEnroll, cId, total, paid, date, status;
+        getline(ss, fId, ','); getline(ss, sEnroll, ','); getline(ss, cId, ',');
+        getline(ss, total, ','); getline(ss, paid, ','); getline(ss, date, ','); getline(ss, status, '\n');
+
+        if (sEnroll == studentEnroll && cId == courseId) {
+            temp << fId << "," << sEnroll << "," << cId << "," << totalAmount
+                 << "," << paid << "," << date << "," << status << "\n";
+            found = true;
+        } else {
+            temp << line << "\n";
+        }
+    }
+    ffees.close();
+
+    if (!found) {
+        temp << feeId << "," << studentEnroll << "," << courseId << "," << totalAmount
+             << ",0, ,Pending\n";
+    }
+
+    temp.close();
+    remove("fees.csv");
+    rename("temp.csv", "fees.csv");
+
+    cout << "\n[+] Fee record " << (found ? "updated" : "created") << " successfully!\n";
+    cout << "Total Fee: " << totalAmount << "\n";
+}
+
+// ----------------- Admin View Fees -----------------
+void adminViewFees() {
+    string line;
+
+    // Load students
+    ifstream fstu("students.csv");
+    map<string, tuple<string,string,string,string>> studentMap; // enrollNo -> (name, rollNo, deptId, courseId)
+    while (getline(fstu, line)) {
+        stringstream ss(line);
+        string enrollNo, rollNo, name, email, phone, dob, gender, deptId, courseId, address, pass;
+        getline(ss, enrollNo, ','); getline(ss, rollNo, ','); getline(ss, name, ',');
+        getline(ss, email, ','); getline(ss, phone, ','); getline(ss, dob, ','); getline(ss, gender, ',');
+        getline(ss, deptId, ','); getline(ss, courseId, ','); getline(ss, address, ','); getline(ss, pass, '\n');
+        studentMap[enrollNo] = make_tuple(name, rollNo, deptId, courseId);
+    }
+    fstu.close();
+
+    // Load departments
+    ifstream fdept("departments.csv");
+    map<string, string> deptMap;
+    while (getline(fdept, line)) {
+        stringstream ss(line);
+        string id, name;
+        getline(ss, id, ','); getline(ss, name, ',');
+        deptMap[id] = name;
+    }
+    fdept.close();
+
+    // Load courses
+    ifstream fcourse("courses.csv");
+    map<string, tuple<string,string,string>> courseMap; // courseId -> (name, deptId, fee)
+    while (getline(fcourse, line)) {
+        stringstream ss(line);
+        string id, cname, deptId, fee;
+        getline(ss, id, ','); getline(ss, cname, ','); getline(ss, deptId, ','); getline(ss, fee, '\n');
+        courseMap[id] = make_tuple(cname, deptId, fee);
+    }
+    fcourse.close();
+
+    // Display fees with full details
+    ifstream fin("fees.csv");
+    cout << left << setw(8) << "FeeID" 
+         << setw(12) << "EnrollNo" 
+         << setw(20) << "Name" 
+         << setw(20) << "Department"
+         << setw(25) << "Course"
+         << setw(10) << "Total"
+         << setw(10) << "Paid"
+         << setw(15) << "Date"
+         << setw(10) << "Status" << "\n";
+    cout << string(130, '-') << "\n";
+
+    while (getline(fin, line)) {
+        string feeId, stuId, courseId, total, paid, date, status;
+        stringstream ss(line);
+        getline(ss, feeId, ','); getline(ss, stuId, ','); getline(ss, courseId, ',');
+        getline(ss, total, ','); getline(ss, paid, ','); getline(ss, date, ','); getline(ss, status, '\n');
+
+        string name = (studentMap.count(stuId) ? get<0>(studentMap[stuId]) : "N/A");
+        string deptName = (studentMap.count(stuId) ? deptMap[get<2>(studentMap[stuId])] : "N/A");
+        string courseName = (courseMap.count(courseId) ? get<0>(courseMap[courseId]) : "N/A");
+
+        cout << left << setw(8) << feeId 
+             << setw(12) << stuId 
+             << setw(20) << name 
+             << setw(20) << deptName
+             << setw(25) << courseName 
+             << setw(10) << total 
+             << setw(10) << paid 
+             << setw(15) << date 
+             << setw(10) << status << "\n";
+    }
+    fin.close();
+}
+
+
+void adminUpdateFeeStatus() {
+    string feeId;
+    cout << "Enter Fee ID to update: ";
+    cin >> feeId;
+
+    ifstream fin("fees.csv");
+    ofstream fout("temp.csv");
+    string line;
+    bool found = false;
+
+    while (getline(fin, line)) {
+        stringstream ss(line);
+        string fId, stuId, courseId, total, paid, date, status;
+        getline(ss, fId, ','); getline(ss, stuId, ','); getline(ss, courseId, ',');
+        getline(ss, total, ','); getline(ss, paid, ','); getline(ss, date, ','); getline(ss, status, '\n');
+
+        if (fId == feeId) {
+            found = true;
+            cout << "Current Status: " << status << ", Amount Paid: " << paid << "\n";
+            string newPaid, newDate, newStatus;
+            do {
+                cout << "Enter amount paid now: ";
+                cin >> newPaid;
+                if (!isNumber(newPaid)) cout << "[!] Enter valid number!\n";
+            } while (!isNumber(newPaid));
+            cout << "Enter payment date (DD/MM/YYYY): ";
+            cin >> newDate;
+
+            int totalAmt = stoi(total);
+            int paidAmt = stoi(paid) + stoi(newPaid);
+
+            if (paidAmt >= totalAmt) newStatus = "Paid";
+            else if (paidAmt > 0) newStatus = "Partial";
+            else newStatus = "Pending";
+
+            paid = to_string(paidAmt);
+            date = newDate;
+            status = newStatus;
+        }
+
+        fout << fId << "," << stuId << "," << courseId << "," << total << "," 
+             << paid << "," << date << "," << status << "\n";
+    }
+
+    fin.close();
+    fout.close();
+    remove("fees.csv");
+    rename("temp.csv", "fees.csv");
+
+    if (found) cout << "[+] Fee record updated successfully!\n";
+    else cout << "[!] Fee ID not found!\n";
+}
+
+
+void ManageFees() {
+    int choice;
+    do {
+        cout << "\n===== Fees Management =====\n";
+        cout << "1. View Fees\n";
+        cout << "2. Set Fees\n";
+        cout << "3. Update Fee Status\n";
+        cout << "4. Back\n";
+        cout << "Enter choice: ";
+        cin >> choice;
+
+        switch (choice) {
+            case 1: adminViewFees(); break;
+            case 2: adminSetFee(); break;
+            case 3: adminUpdateFeeStatus(); break;
+            case 4: cout << "Returning to main menu...\n"; break;
+            default: cout << "[!] Invalid choice!\n";
+        }
+    } while (choice != 4);
+}
+
+
+// ------------------- ADMIN DASHBOARD -------------------
+void adminDashboard() {
+    int choice;
+    do {
+        cout << "\n=========== ADMIN DASHBOARD ===========\n";
+        cout << "1. Manage Teachers\n";
+       // cout << "2. Manage Students\n";
+        cout << "2. Manage Courses\n";
+        cout << "3. Manage Departments\n";
+        cout << "4. Manage Fees\n";
+        cout << "5. Logout\n";
+        cout << "=======================================\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+
+        switch (choice) {
+            case 1:
+                 manageTeachers();
+                break;
+
+//            case 2:
+//              manageStudents();            
+//			  break;
+
+            case 2:
+                manageCourses();
+                break;
+
+            case 3:
+               manageDepartments();
+                break;
+
+            case 4:
+               ManageFees();
+                break;
+
+            case 5:
+                cout << "\n[?] Logging out...\n";
+                break;
+
+            default:
+                cout << "[!] Invalid choice. Try again.\n";
+                break;
+        }
+    } while (choice != 5);
+}
+
+
+void teacherMenu() {
+    int choice;
+    do {
+        cout << "========== TEACHER DASHBOARD ==========\n";
+       cout << "1.Manage Students\n";
+       cout << "2.View Free Records\n";
+        //cout <<"2.View Student Free Records\n";
+        cout << "3. Logout\n";
+        cout << "=======================================\n";
+        cout << "Enter choice: ";
+        cin >> choice;
+
+        switch (choice) {
+           case 1: manageStudents(); break;
+            case 2:adminViewFees07(); break;
+            case 3: cout << "[?] Logging out...\n"; break;
+            default: cout << "[!] Invalid choice.\n"; break;
+        }
+    } while (choice != 3);
+}
+
+void studentMenu() {
+    int choice;
+    do {
+        cout << "========== STUDENT DASHBOARD ==========\n";
+        cout << "1. View Courses\n";
+        cout << "2. View Results\n";
+        cout << "3. Logout\n";
+        cout << "=======================================\n";
+        cout << "Enter choice: ";
+        cin >> choice;
+
+        switch (choice) {
+            case 1: cout << "[?] Viewing Courses...\n"; break;
+            case 2: cout << "[?] Viewing Results...\n"; break;
+            case 3: cout << "[?] Logging out...\n"; break;
+            default: cout << "[!] Invalid choice.\n"; break;
+        }
+    } while (choice != 3);
+}
+
+
+
+
+
+void adminLogin() {
+    string user, pass;
+    cout << "\n========== ADMIN LOGIN ==========\n";
+    cout << "Enter username: ";
+    cin >> user;
+    cout << "Enter password: ";
+    pass = getHiddenPassword(true); // hides password input
+
+    if (user == ADMIN_USER && pass == ADMIN_PASS) {
+        cout << "\n[+] Login Successful! Welcome Admin.\n";
+        adminDashboard();
+    } else {
+        cout << "\n[!] Invalid Username or Password.\n";
+    }
+}
+
+// ------------------- Login/Register -------------------
+void roleLogin(string role) {
+    int choice;
+    do {
+        cout << "========== " << role << " AUTHENTICATION ==========\n";
+
+        if (role == "Student") {
+            cout << "1. Register\n";
+            cout << "2. Login\n";
+            cout << "3. Back to Main Menu\n";
+        } else if (role == "Teacher") {
+            cout << "1. Login\n";   // only login for teacher
+            cout << "2. Back to Main Menu\n";
+        }
+
+        cout << "=============================================\n";
+        cout << "Enter choice: ";
+        cin >> choice;
+
+        // ------------------ STUDENT ------------------
+        if (role == "Student") {
+            if (choice == 1) {   // Student Register
+                string user, pass, email, phone, dob, gender, address, deptId, courseId;
+
+                // Generate Student ID
+                string id = generateId("students.csv", "S");
+                cout << "[Student] Your generated ID: " << id << "\n";
+
+                // Clear buffer and read full name
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Enter Student username (First Last): ";
+                getline(cin, user);
+
+                // Email
+                do {
+                    cout << "Enter Student Email ID: ";
+                    cin >> email;
+                    if (!isValidEmail(email)) cout << "[!] Invalid email format!\n";
+                } while (!isValidEmail(email));
+
+                // Phone
+                do {
+                    cout << "Enter Student Phone (10 digits): ";
+                    cin >> phone;
+                    if (!isValidPhone(phone)) cout << "[!] Invalid phone number!\n";
+                } while (!isValidPhone(phone));
+
+                // DOB
+                do {
+                    cout << "Enter Student Date of Birth (DD/MM/YYYY): ";
+                    cin >> dob;
+                    if (!isValidDOB(dob)) cout << "[!] Invalid DOB format!\n";
+                } while (!isValidDOB(dob));
+
+                // Gender
+                do {
+                    cout << "Enter Student Gender (M/F/O): ";
+                    cin >> gender;
+                    if (!isValidGender(gender)) cout << "[!] Invalid gender! Enter M/F/O.\n";
+                } while (!isValidGender(gender));
+
+                cin.ignore();
+                cout << "Enter Student Address: ";
+                getline(cin, address);
+
+                // ----------------- Department Selection -----------------
+                vector<pair<string,string>> deptList = loadDepartments();
+                showDepartments(deptList);
+
+                do {
+                    cout << "Enter Department ID: ";
+                    cin >> deptId;
+                    if (!existsInFile("departments.csv", deptId))
+                        cout << "[!] Invalid Department ID.\n";
+                } while (!existsInFile("departments.csv", deptId));
+
+                // ----------------- Course Selection -----------------
+                courseId = selectCourseForDept(deptId);
+                cout << "[Student] Selected Course: " << courseId << "\n";
+
+                // ----------------- Password -----------------
+                do {
+                    cout << "Enter password: ";
+                    pass = getHiddenPassword(true);
+                    if (!isValidPassword(pass)) {
+                        cout << "\n[!] Weak password. Use at least 8 characters with uppercase, lowercase, digit, and special character.\n";
+                    }
+                } while (!isValidPassword(pass));
+
+                // ----------------- Save to CSV -----------------
+                ofstream fout("students.csv", ios::app);
+                fout << id << "," << user << "," << email << "," << phone << "," << dob << "," << gender
+                     << "," << deptId << "," << courseId << "," << address << "," << pass << "\n";
+                fout.close();
+                cout << "\n[+] Student registered successfully!\n";
+            }
+            else if (choice == 2) {  // Student Login
+                string user, pass;
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Enter Student username (First Last): ";
+                getline(cin, user);
+                cout << "Enter password: ";
+                pass = getHiddenPassword(true);
+
+                bool success = false;
+                ifstream fin("students.csv");
+                string line;
+                while (getline(fin, line)) {
+                    stringstream ss(line);
+                    string id, u, email, phone, dob, gender, deptId, courseId, address, p;
+                    getline(ss, id, ',');
+                    getline(ss, u, ',');
+                    getline(ss, email, ',');
+                    getline(ss, phone, ',');
+                    getline(ss, dob, ',');
+                    getline(ss, gender, ',');
+                    getline(ss, deptId, ',');
+                    getline(ss, courseId, ',');
+                    getline(ss, address, ',');
+                    getline(ss, p, '\n');
+                    if (u == user && p == pass) {
+                        success = true;
+                        break;
+                    }
+                }
+                fin.close();
+
+                if (success) {
+                    cout << "\n[+] Student Login successful! Welcome " << user << "\n";
+                    studentMenu();
+                } else {
+                    cout << "\n[!] Invalid username or password!\n";
+                }
+            }
+        }
+
+        // ------------------ TEACHER ------------------
+        else if (role == "Teacher") {
+            if (choice == 1) {  // Teacher Login
+                string user, pass;
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Enter Teacher username (First Last): ";
+                getline(cin, user);
+                cout << "Enter password: ";
+                pass = getHiddenPassword(true);
+
+                bool success = false;
+                ifstream fin("teachers.csv");
+                string line;
+                while (getline(fin, line)) {
+                    stringstream ss(line);
+                    string id, u, email, phone, dob, gender, dept, course, address, p;
+                    getline(ss, id, ',');
+                    getline(ss, u, ',');
+                    getline(ss, email, ',');
+                    getline(ss, phone, ',');
+                    getline(ss, dob, ',');
+                    getline(ss, gender, ',');
+                    getline(ss, dept, ',');
+                    getline(ss, course, ',');
+                    getline(ss, address, ',');
+                    getline(ss, p, '\n');
+                    if (u == user && p == pass) {
+                        success = true;
+                        break;
+                    }
+                }
+                fin.close();
+
+                if (success) {
+                    cout << "\n[+] Teacher Login successful! Welcome " << user << "\n";
+                    teacherMenu();
+                } else {
+                    cout << "\n[!] Invalid username or password!\n";
+                }
+            }
+        }
+
+    } while ((role == "Student" && choice != 3) || (role == "Teacher" && choice != 2));
+}
+
+
+// ------------------- Main Menu -------------------
+int main() {
+    printBanner("COLLEGE MANAGEMENT SYSTEM");
+
+   int choice;
+    while (true) {   // infinite loop until user closes program manually
+        cout << "+--------------------------------------------------+\n";
+        cout << "|                      MENU                        |\n";
+        cout << "+--------------------------------------------------+\n";
+        cout << "|  1. Admin                                        |\n";
+        cout << "|  2. Teacher                                      |\n";
+        cout << "|  3. Student                                      |\n";
+        cout << "+--------------------------------------------------+\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+
+        switch (choice) {
+            case 1: adminLogin(); break;              // ? fixed login
+            case 2: roleLogin("Teacher"); break;      // ? CSV-based
+            case 3: roleLogin("Student"); break;      // ? CSV-based
+            case 4: cout << "[?] Exiting system... Goodbye!\n"; return 0;
+            default: cout << "[!] Invalid choice.\n"; break;
+        }
+    }
+
+    return 0;
+}
